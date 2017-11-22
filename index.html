@@ -5,28 +5,30 @@
     </body>
     <script src="src/yalla.js"></script>
     <script type="module">
-        let {html} = new Context();
-        let toggle = true;
-        let valueOne = 'value one';
-        let valueTwo = 'value two';
+        let {html,htmlCollection} = new Context();
+        let items = [{id:'hello',name:'hello'},{id:'world',name:'world'}];
+        function deleteAll(){
+            items = [];
+            update();
+        }
+        function add(){
+
+        }
         function update(){
             render(html`
-                <div>Hello This async sample
-                <button onclick="${e => {toggle = !toggle;update()} }">Toggle</button>
-                ${html`<button onclick="${e => {toggle ? alert('One') : alert('Two')}}">${toggle ? valueOne : valueTwo}</button>`}
-                ${html`<button onclick="${e => {toggle ? alert('Two') : alert('One')}}">${toggle ? valueTwo : valueOne}</button>`}
-                </div>
+                <button onclick="${e => deleteAll()}">Delete</button>
+                <table>
+                    <tbody>
+                        ${htmlCollection(items,i => i.id , item => {
+                            return html`<tr>
+                                <td>${item.name}</td>
+                            </tr>`
+                        })}
+                    </tbody>
+                </table>
               `,document.body);
         }
-        /*
-        function update(){
-            render(html`
-                <div>Hello This async sample
-                ${html`<button onclick="${e => {toggle ? alert('One') : alert('Two')}}">${toggle ? valueOne : valueTwo}</button>`}
-                ${html`<button onclick="${e => {toggle ? alert('Two') : alert('One')}}">${toggle ? valueTwo : valueOne}</button>`}
-                </div>
-              `,document.body);
-        }*/
+
 
         update();
     </script>
