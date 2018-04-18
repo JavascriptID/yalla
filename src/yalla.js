@@ -9,6 +9,7 @@
         root.render = root.render || root.yalla.render;
         root.plug = root.plug || root.yalla.plug;
         root.uuidv4 = root.uuidv4 || root.yalla.uuidv4;
+        root.Event = root.Event || root.yalla.Event;
     }
 }(typeof self !== "undefined" ? self : eval("this"), function () {
     /*
@@ -36,6 +37,10 @@
      */
 
     let isChrome = "chrome" in window && "webstore" in window.chrome;
+
+    const Event = {
+        SYNCING_DONE : "syncingdone"
+    };
 
     const cloneNodeTree = (node) => {
         if (isChrome) {
@@ -246,19 +251,21 @@
             openTag = (openTag.indexOf(" ") > 0 ? openTag.substring(0, openTag.indexOf(" ")) : openTag).toLowerCase();
             let rootTag = parentTagMap[openTag];
             rootTag = rootTag || "div";
-            let template = document.createElement(rootTag);
+            let template = rootTag === "svg" ? document.createElementNS("http://www.w3.org/2000/svg","svg") : document.createElement(rootTag);
             template.innerHTML = contentText;
             return template;
         }
 
         static applyValues(nextHtmlTemplate, nodeValueIndexArray) {
             let newValues = nextHtmlTemplate.values;
-
+            let context = nextHtmlTemplate.context;
             if (!nodeValueIndexArray) {
                 return;
             }
-
             nodeValueIndexArray.forEach((nodeValueIndex) => {
+                if(nodeValueIndex == null){
+                    return;
+                }
                 let {node, valueIndexes, values} = nodeValueIndex;
                 let newActualValues = Array.isArray(valueIndexes) ? valueIndexes.map((valueIndex) => newValues[(valueIndex)]) : newValues[valueIndexes];
 
@@ -277,21 +284,53 @@
                         node.ownerElement[nodeName] = newValues[valueIndex];
                         marker.attributes[nodeName] = newValues[valueIndex];
                     } else {
-                        let actualAttributeValue = buildActualAttributeValue(nodeValue, valueIndexes, newValues);
-                        if (isMinimizationAttribute(node)) {
-                            node.ownerElement[nodeName] = actualAttributeValue.trim() === "true";
-                            node.ownerElement.setAttribute(nodeName, "");
-                        } else {
-                            node.ownerElement.setAttribute(nodeName, actualAttributeValue);
-                            if (attributeChangesReflectToProperties(nodeName, node.ownerElement.nodeName)) {
-                                node.ownerElement[nodeName] = actualAttributeValue;
+                        let plugOrPromiseValue = newValues.reduce((plugOrPromise,newValue,index) => {
+                            if(newValue instanceof Plug || isPromise(newValue)){
+                                plugOrPromise.push({index,value:newValue});
                             }
+                            return plugOrPromise;
+                        },[]);
+
+                        if(plugOrPromiseValue.length>0){
+                            node.ownerElement.id = node.ownerElement.id || uuidv4();
+                            let id = node.ownerElement.id;
+                            context.addEventListener(Event.SYNCING_DONE,()=>{
+                                let node = document.getElementById(id);
+                                if (!node) {
+                                    node = context.root.getElementsByTagName("*")[id];
+                                }
+                                plugOrPromiseValue.forEach(({index,value}) => {
+                                    let valueIndex = index;
+                                    let attributeNode = node.getAttributeNode(nodeName);
+
+                                    let setContent = (value) => {
+                                        let marker = Marker.from(node);
+                                        let {nodeValue:template,valueIndexes,newValues:templateValue} = marker.attributes[nodeName];
+                                        newValues[valueIndex] = value;
+                                        HtmlTemplate.updateAttributeValue(nodeValue, valueIndexes, newValues, attributeNode);
+                                    };
+
+                                    if(value instanceof Plug){
+                                        value.factory.apply(null,[{
+                                            node : attributeNode,
+                                            name : nodeName,
+                                            getContent : () => {
+                                                let marker = Marker.from(node);
+                                                let {newValues:templateValue} = marker.attributes[nodeName];
+                                                return newValues[valueIndex];
+                                            },
+                                            setContent
+                                        }]);
+                                    }
+                                    if(isPromise(value)){
+                                        value.then(setContent);
+                                    }
+                                });
+                            });
+                        }else{
+                            HtmlTemplate.updateAttributeValue(nodeValue, valueIndexes, newValues, node);
                         }
-                        if (nodeName.indexOf(".bind") >= 0) {
-                            let attributeName = nodeName.substring(0, nodeName.indexOf(".bind"));
-                            node.ownerElement.setAttribute(attributeName, actualAttributeValue);
-                        }
-                        marker.attributes[nodeName] = actualAttributeValue;
+                        marker.attributes[nodeName] = {template : nodeValue,valueIndexes,templateValue : newValues};
                     }
                 }
                 if (node.nodeType === Node.TEXT_NODE) {
@@ -299,10 +338,30 @@
                 }
                 if (node.nodeType === Node.COMMENT_NODE) {
                     let value = newValues[valueIndexes];
-                    Outlet.from(node).setContent(value);
+                    Outlet.from(node).setContent(value,context);
                 }
                 nodeValueIndex.values = newActualValues;
             });
+        }
+
+        static updateAttributeValue(attributeValue, valueIndexes, newValues, attributeNode) {
+            let nodeName = attributeNode.nodeName;
+            let actualAttributeValue = buildActualAttributeValue(attributeValue, valueIndexes, newValues);
+            if (isMinimizationAttribute(attributeNode)) {
+                attributeNode.ownerElement[nodeName] = actualAttributeValue.trim() === "true";
+                attributeNode.ownerElement.setAttribute(nodeName, "");
+            } else {
+                attributeNode.ownerElement.setAttribute(nodeName, actualAttributeValue);
+                if (attributeChangesReflectToProperties(nodeName, attributeNode.ownerElement.nodeName)) {
+                    attributeNode.ownerElement[nodeName] = actualAttributeValue;
+                }
+            }
+            if (nodeName.indexOf(".bind") >= 0) {
+                let attributeName = nodeName.substring(0, nodeName.indexOf(".bind"));
+                attributeNode.ownerElement.setAttribute(attributeName, actualAttributeValue);
+                attributeNode.ownerElement.removeAttribute(nodeName);
+            }
+            return actualAttributeValue;
         }
 
         buildTemplate(templateString) {
@@ -350,18 +409,23 @@
             return nodeValueIndexArray;
         }
 
-        constructTemplate(useCache = true) {
-            if(useCache){
-                if (!this.context.hasCache(this.key)) {
-                    let templateString = this.buildStringSequence();
-                    this.buildTemplate(templateString);
-                    return this.context.cache(this.key, this);
-                }
-                return this.context.cache(this.key);
+        constructTemplate() {
+            if (!this.context.hasCache(this.key)) {
+                let templateString = this.buildStringSequence();
+                this.buildTemplate(templateString);
+                return this.context.cache(this.key, this);
             }
-            let templateString = this.buildStringSequence();
-            this.buildTemplate(templateString);
-            return this;
+            let htmlTemplate = this.context.cache(this.key);
+            let promisesPlaceholder = htmlTemplate.documentFragment.querySelectorAll("span[data-async-outlet]");
+            let promisesPlaceHolderLength = promisesPlaceholder.length;
+            while(promisesPlaceHolderLength--){
+                let promisePlaceholder = promisesPlaceholder[promisesPlaceHolderLength];
+                if(promisePlaceholder.nextSibling){
+                    let outlet = Outlet.from(promisePlaceholder.nextSibling);
+                    outlet.clearContent();
+                }
+            }
+            return htmlTemplate;
         }
 
         buildStringSequence() {
@@ -377,6 +441,7 @@
             this.syncCallbackStack = [];
             this.html = (strings, ...values) => new HtmlTemplate(strings, values, this);
             this.htmlCollection = (arrayItems, keyFn, templateFn) => new HtmlTemplateCollection(arrayItems, keyFn, templateFn, this);
+            this.listeners = {};
         }
 
         hasCache(key) {
@@ -394,13 +459,62 @@
             this.syncCallbackStack.push(callback);
         }
 
+        addEventListener(event,callback,calledOnce=false){
+            let token = `${event}:${uuidv4()}`;
+            this.listeners[event] = this.listeners[event] || [];
+            let listener = this.listeners[event];
+            listener.push({token,callback,calledOnce});
+            return token;
+        }
+
+        removeEventListener(token){
+            let [event,tokenId] = token.split(":");
+            let listener = this.listeners[event];
+            listener = listener.filter(callbackItem => callbackItem.token != tokenId);
+            this.listeners[event] = listener;
+        }
+
+        dispatchEvent(event,...payload){
+            if(!(event in this.listeners)){
+                return;
+            }
+            let listener = this.listeners[event];
+
+            let markForRemoval = [];
+            listener.forEach(callbackItem => {
+                callbackItem.callback.apply(null,payload);
+                if(callbackItem.calledOnce){
+                    let [event,tokenId] = callbackItem.token.split(":");
+                    markForRemoval.push(tokenId);
+                }
+            });
+            if(markForRemoval.length > 0){
+                listener = listener.filter(callbackItem => {
+                    return markForRemoval.indexOf(callbackItem.token) < 0
+                });
+            }
+            this.listeners[event] = listener;
+        }
+
         clearSyncCallbacks() {
             this.syncCallbackStack.forEach((callback) => callback.apply());
             this.syncCallbackStack = [];
+            this.dispatchEvent(Event.SYNCING_DONE);
         }
     }
 
-    const {html} = new Context();
+    const getTemporaryOutlet = (id, context) => {
+        let templateContent = document.getElementById(id);
+        if (!templateContent) {
+            templateContent = context.root.getElementsByTagName("*")[id];
+        }
+        if(templateContent){
+            let commentNode = templateContent.nextSibling;
+            templateContent.remove();
+            return Outlet.from(commentNode);
+        }
+        return false;
+    };
 
     class Outlet {
         constructor(commentNode) {
@@ -452,17 +566,22 @@
 
         }
 
-        setContent(template) {
+        makeTemporaryOutlet(context){
+            let id = uuidv4();
+            this.setHtmlTemplateContent(context.html`<span id="${id}" style="display: none" data-async-outlet>outlet</span>`);
+            return id;
+        };
+
+        setContent(template,context) {
             if (isPromise(template)) {
                 if (this.content === null) {
-                    let self = this;
-                    let id = uuidv4();
-                    this.setHtmlTemplateContent(html`<span id="${id}" style="display: none">outlet</span>`);
+                    let id = this.makeTemporaryOutlet(context);
                     template.then((result) => {
-                        let templateContent = document.getElementById(id);
-                        let newCommentNode = templateContent.nextSibling;
-                        Outlet.from(newCommentNode).setContent(result);
-                        self.clearContent();
+                        let outlet = getTemporaryOutlet(id, context);
+                        if(outlet){
+                            outlet.setContent(result);
+                            syncNode(result, outlet.commentNode);
+                        }
                     });
                 } else {
                     template.then((result) => {
@@ -470,7 +589,30 @@
                     });
                 }
             } else if (template instanceof Plug) {
-                template.factory.apply(null, [this]);
+                if (this.content === null) {
+                    let id = this.makeTemporaryOutlet(context);
+                    context.addEventListener(Event.SYNCING_DONE,() => {
+                        let outlet = getTemporaryOutlet(id, context);
+                        if(outlet){
+                            template.factory.apply(null, [{
+                                getContent : () => outlet.currentContent,
+                                setContent : (value) =>{
+                                    outlet.setContent.apply(outlet,[value]);
+                                    outlet.currentContent = value;
+                                }
+                            }]);
+                        }
+                    },true);
+                } else {
+                    let self = this;
+                    template.factory.apply(null, [{
+                        getContent : () => self.currentContent,
+                        setContent : (value) => {
+                            self.setContent.apply(self,[value]);
+                            self.currentContent = value;
+                        }
+                    }]);
+                }
             } else if (template instanceof HtmlTemplate) {
                 this.setHtmlTemplateContent(template);
             } else if (template instanceof HtmlTemplateCollection) {
@@ -511,8 +653,7 @@
                 clearContentWasCalled = true;
             }
             if (!this.content) {
-                let valueIsPromise = isPromise(htmlTemplate.values[0]);
-                let template = htmlTemplate.constructTemplate(!valueIsPromise);
+                let template = htmlTemplate.constructTemplate();
                 this.content = new HtmlTemplateInstance(template, this);
             }
             this.content.applyValues(htmlTemplate);
@@ -571,13 +712,14 @@
         }
 
         applyValues(newHtmlTemplateCollection) {
+            let context = newHtmlTemplateCollection.context;
             if (this.instance === null) {
                 this.instance = {};
                 let outletPointer = this.outlet.commentNode;
                 newHtmlTemplateCollection.iterateRight((item, key, template) => {
                     let childPlaceholder = Outlet.from(document.createComment("outlet-child"));
                     outletPointer.parentNode.insertBefore(childPlaceholder.commentNode, outletPointer);
-                    Outlet.from(childPlaceholder.commentNode).setContent(template);
+                    Outlet.from(childPlaceholder.commentNode).setContent(template,context);
                     outletPointer = childPlaceholder.firstChildNode();
                     this.instance[key] = childPlaceholder.commentNode;
                 });
@@ -606,23 +748,17 @@
                 newHtmlTemplateCollection.iterateRight((item, key, template) => {
                     let commentNode = this.instance[key];
                     if (commentNode) {
-                        let childPlaceholder = Outlet.from(commentNode);
-                        if (childPlaceholder.content instanceof HtmlTemplateInstance) {
-                            childPlaceholder.setHtmlTemplateContent(template);
-                        } else if (childPlaceholder.content instanceof HtmlTemplateCollectionInstance) {
-                            childPlaceholder.setHtmlTemplateCollectionContent(template);
-                        } else {
-                            childPlaceholder.setTextContent(template);
-                        }
+                        let childOutlet = Outlet.from(commentNode);
+                        childOutlet.setContent(template);
                         if (outletPointer.previousSibling !== commentNode) {
                             outletPointer.parentNode.insertBefore(commentNode, outletPointer);
-                            childPlaceholder.validateInstancePosition();
+                            childOutlet.validateInstancePosition();
                         }
-                        outletPointer = childPlaceholder.firstChildNode();
+                        outletPointer = childOutlet.firstChildNode();
                     } else {
                         let childPlaceholder = Outlet.from(document.createComment("outlet-child"));
                         outletPointer.parentNode.insertBefore(childPlaceholder.commentNode, outletPointer);
-                        Outlet.from(childPlaceholder.commentNode).setContent(template);
+                        Outlet.from(childPlaceholder.commentNode).setContent(template,context);
                         outletPointer = childPlaceholder.firstChildNode();
                         this.instance[key] = childPlaceholder.commentNode;
                         this.template.context.addSyncCallback(() => syncNode(template, childPlaceholder.commentNode));
@@ -682,17 +818,29 @@
         }
     }
 
+    const validateIsFunction = (functionToCheck,error) => {
+        let isFunction = functionToCheck && typeof functionToCheck === 'function';
+        if(!isFunction){
+            throw new Error(error);
+        }
+    };
+
     const applyAttributeValue = (actualNode, valueIndexes, templateValues, nodeValue) => {
         let marker = Marker.from(actualNode);
         let nodeName = actualNode.nodeName;
         let isEvent = nodeName.indexOf("on") === 0;
         if (isEvent) {
             let valueIndex = valueIndexes[0];
+            validateIsFunction(templateValues[valueIndex],`Event listener ${actualNode.nodeName} should be a function (event) => {}'`);
             marker.attributes[nodeName] = templateValues[valueIndex];
             actualNode.ownerElement.setAttribute(nodeName, "return false;");
             actualNode.ownerElement[nodeName] = templateValues[valueIndex];
         } else {
-            marker.attributes[nodeName] = buildActualAttributeValue(nodeValue, valueIndexes, templateValues);
+            marker.attributes[nodeName] = {
+                template : nodeValue,
+                valueIndexes,
+                templateValue : templateValues
+            };
         }
     };
 
@@ -712,10 +860,13 @@
         }
     };
 
-    const mapNodeValueIndexArray = (nodeValueIndex, docFragment, templateValues) => {
+    const mapNodeValueIndexArray = (nodeValueIndex, docFragment, templateValues = []) => {
         let {nodeValue, valueIndexes} = nodeValueIndex;
         let path = getPath(nodeValueIndex.node);
         let actualNode = getNode(path, docFragment);
+        if(!actualNode){
+            return;
+        }
         let values = Array.isArray(valueIndexes) ? valueIndexes.map(index => templateValues[index]) : templateValues[valueIndexes];
         let isStyleNode = actualNode.parentNode && actualNode.parentNode.nodeName.toUpperCase() === "STYLE";
         if (isStyleNode) {
@@ -768,32 +919,72 @@
         }
     };
 
-    const render = (templateValue, node) => {
-        let setContent = () => {
-            Outlet.from(node).setContent(templateValue);
-            if (!node.$synced) {
-                syncNode(templateValue, node);
-                node.$synced = true;
-            }
-        };
-        if (requestAnimationFrame in window) {
-            requestAnimationFrame(setContent);
-        } else {
-            setContent();
+    const syncContent = function (templateValue,node) {
+        if (!node.$synced) {
+            syncNode(templateValue, node);
+            node.$synced = true;
         }
+    };
+    const setContent = (templateValue,node) => {
+        templateValue.context.root = templateValue.context.root || node;
+        Outlet.from(node).setContent(templateValue);
+    };
 
-        if (window.Promise) {
-            return new Promise(resolve => {
-                setTimeout(() => {
-                    templateValue.context.clearSyncCallbacks();
-                    resolve();
-                }, 300);
-            });
+    const executeWithIdleCallback = (callback) => {
+        if ("requestIdleCallback" in window) {
+            requestIdleCallback(callback);
         } else {
-            setTimeout(templateValue.context.clearSyncCallbacks, 300);
+            callback();
+        }
+    };
+    const executeWithRequestAnimationFrame = (callback) => {
+        if ("requestAnimationFrame" in window) {
+            requestAnimationFrame(callback);
+        } else {
+            callback();
         }
     };
 
+    const render = (templateValue, node , immediateEffect = true) => {
+        if("Promise" in window){
+            return new Promise(resolve => {
+                let update = ()=>{
+                    setContent.apply(null,[templateValue,node]);
+                    resolve();
+                };
+                if(immediateEffect){
+                    executeWithRequestAnimationFrame(update);
+                }else{
+                    executeWithIdleCallback(update);
+                }
+
+            }).then(()=>{
+                return new Promise(resolve => {
+                    executeWithIdleCallback(()=>{
+                        syncContent.apply(null,[templateValue,node]);
+                        resolve();
+                    });
+                });
+            }).then(() => {
+                return new Promise(resolve => {
+                    executeWithIdleCallback(() =>{
+                        templateValue.context.clearSyncCallbacks();
+                        resolve();
+                    });
+                });
+            });
+        }else{
+            let thencallback = {then:()=>{}};
+            setTimeout(()=>{
+                setContent(templateValue,node);
+                syncContent(templateValue,node);
+                templateValue.context.clearSyncCallbacks();
+                thencallback.then.apply(null,[]);
+            },0);
+            return thencallback;
+
+        }
+    };
 
     class Plug {
         constructor(factory) {
@@ -805,5 +996,5 @@
         return new Plug(callback);
     };
 
-    return {Context, render, plug, uuidv4};
+    return {Context, render, plug, uuidv4, Event};
 }));

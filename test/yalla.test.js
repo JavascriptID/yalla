@@ -14,12 +14,14 @@ describe('yalla.js',function(){
     describe("Element compatibility checking ",function(){
         // singleton element
         ['area','base','br','col','embed','hr','img','input','keygen','link','meta','param','source','track','wbr'].forEach(function(tag){
-            it(`Should render singleton ${tag}`,function () {
+            it(`Should render singleton ${tag}`,function (done) {
                 let dom = document.createElement('div');
                 let display = true;
-                render(html(['<'+tag+'>']),dom);
-                expect(dom.innerHTML).to.satisfy(function (innerHtml) {
-                    return innerHtml == `<${tag}>${OUTLET}`;
+                render(html(['<'+tag+'>']),dom).then(function(){
+                    expect(dom.innerHTML).to.satisfy(function (innerHtml) {
+                        return innerHtml == `<${tag}>${OUTLET}`;
+                    });
+                    done();
                 });
             });
         });
@@ -32,34 +34,42 @@ describe('yalla.js',function(){
             'pre','progress','q','rp','rt','ruby','s','samp','section','select','small','span','strike','strong',
             'style','sub','summary','sup','table','tbody','td','textarea','tfoot','th','thead','time','tr','tt',
             'u','var','video'].forEach(function(tag){
-            it(`Should render optional content ${tag}`,function () {
+            it(`Should render optional content ${tag}`,function (done) {
                 let dom = document.createElement('div');
                 let display = true;
-                render(html(['<'+tag+'></'+tag+'>']),dom);
-                expect(dom.innerHTML).to.satisfy(function (innerHtml) {
-                    return innerHtml == `<${tag}></${tag}>${OUTLET}`;
+                render(html(['<'+tag+'></'+tag+'>']),dom).then(function(){
+                    expect(dom.innerHTML).to.satisfy(function (innerHtml) {
+                        return innerHtml == `<${tag}></${tag}>${OUTLET}`;
+                    });
+                    done();
                 });
             });
         });
         // element with mandatory content
         ['div','label','li','ul'].forEach(function(tag){
-            it(`Should render special tag ${tag}`,function () {
+            it(`Should render special tag ${tag}`,function (done) {
                 let dom = document.createElement('div');
                 let display = true;
-                render(html(['<'+tag+'>content</'+tag+'>']),dom);
-                expect(dom.innerHTML).to.satisfy(function (innerHtml) {
-                    return innerHtml == `<${tag}>content</${tag}>${OUTLET}`;
+                render(html(['<'+tag+'>content</'+tag+'>']),dom).then(function(){
+                    expect(dom.innerHTML).to.satisfy(function (innerHtml) {
+                        return innerHtml == `<${tag}>content</${tag}>${OUTLET}`;
+                    });
+                    done();
                 });
+
             });
         });
 
-        it('should validate attribute minimization',function(){
+        it('should validate attribute minimization',function(done){
             let dom = document.createElement('div');
             let checked = true;
-            render(html`<input type="checkbox" checked=" ${checked} ">`,dom);
-            expect(dom).to.satisfy(function (dom) {
-                return dom.firstElementChild.checked == true;
+            render(html`<input type="checkbox" checked=" ${checked} ">`,dom).then(function(){
+                expect(dom).to.satisfy(function (dom) {
+                    return dom.firstElementChild.checked == true;
+                });
+                done();
             });
+
         });
     });
 
@@ -72,14 +82,12 @@ describe('yalla.js',function(){
             let dom = document.createElement('div');
             render(html`<input type="button" onclick="${updateLabel}">${label}`,dom).then(function(){
                 updateLabel();
-                render(html`<input type="button" onclick="${updateLabel}">${label}`,dom);
+                return render(html`<input type="button" onclick="${updateLabel}">${label}`,dom)
+            }).then(function(){
                 expect(dom.childNodes[1].nodeValue).to.equal(label);
                 done();
-            });
-            expect(dom.childNodes[0]).to.satisfy(function(input){
-                return input.onclick != null;
-            });
-            expect(dom.childNodes[1].nodeValue).to.equal(label);
+            })
+
         })
     });
     //
@@ -87,35 +95,11 @@ describe('yalla.js',function(){
         it('Should render collection',function(done){
             let items = ['One','Two','Three'];
             let dom = document.createElement('div');
-            render(html`<ul>${htmlCollection(items,i=>i,i => html`<li>${i}</li>`)}</ul>`,dom);
-            expect(dom.innerHTML).to.equal('<ul><li>One<!--outlet--></li><!--outlet-child--><li>Two<!--outlet--></li><!--outlet-child--><li>Three<!--outlet--></li><!--outlet-child--><!--outlet--></ul><!--outlet-->');
-            done();
-        })
-        // TODO !!!
-        /*
-         it('Should render collection in collection',function(done){
-         let items = ['One','Two','Three'];
-         let itemsTwo = ['Four','Five','Six'];
-         let dom = document.createElement('div');
-         render(html`<ul>${htmlCollection(items,i=>i,i => {
-         return htmlCollection(itemsTwo,i=>i,i=> html`<li>${i}</li>`)
-         })}</ul>`,dom);
-
-         function validateDom(){
-         let expectedResult = items.map(i => {
-         let result = itemsTwo.map(i => `<li>${i}<!--outlet--></li><!--outlet-->`);
-         result.push('<!--outlet-->');
-         return result
-         }).reduce((a,b) => {
-         return a.concat(b);
-         });
-         expectedResult = ['<ul>',...expectedResult,'<!--outlet--></ul><!--outlet-->'];
-         expect(dom.innerHTML).to.equal(expectedResult.join(''));
-         }
-         validateDom();
-         done();
-         });
-         */
+            render(html`<ul>${htmlCollection(items,i=>i,i => html`<li>${i}</li>`)}</ul>`,dom).then(function(){
+                expect(dom.innerHTML).to.equal('<ul><li>One<!--outlet--></li><!--outlet-child--><li>Two<!--outlet--></li><!--outlet-child--><li>Three<!--outlet--></li><!--outlet-child--><!--outlet--></ul><!--outlet-->');
+                done();
+            });
+        });
 
         it('Should render collection Addition',function(done){
             let items = ['One','Two','Three'];
@@ -131,12 +115,12 @@ describe('yalla.js',function(){
             }
             update().then(function(){
                 items.push('four');
-                update();
+                return update();
+            }).then(function(){
                 validateDom();
                 done();
             });
-            validateDom();
-        })
+        });
 
         it('Should render collection removal',function(done){
             let items = ['One','Two','Three'];
@@ -151,14 +135,16 @@ describe('yalla.js',function(){
             }
 
             update().then(function(){
+                validateDom();
+            }).then(function(){
                 items.splice(0,1);
-                update().then(function () {
-                    validateDom();
-                    done();
-                });
+                return update();
+            }).then(function () {
+                validateDom();
+                done();
             });
-            validateDom();
-        })
+
+        });
 
         it('Should handle swap element',function(done){
             let items = ['One','Two','Three'];
@@ -172,33 +158,31 @@ describe('yalla.js',function(){
                 expect(dom.innerHTML).to.equal(expectedResult.join(''));
             }
 
-            update().then(function(){
+            update().then(()=> validateDom()).then(function(){
                 let tmp = items[1];
                 items[1] = items[0];
                 items[0] = tmp;
-                update().then(function () {
-                    validateDom();
-                    done();
-                });
+                return update()
+            }).then(function () {
+                validateDom();
+                done();
             });
-            validateDom();
-        })
+
+        });
 
         it('Should render promotion and depromotion',function(done){
             let items = ['One','Two','Three'];
             let dom = document.createElement('div');
             render(html`<ul>${htmlCollection(items,i=>i,i => html`<li>${i}</li>`)}</ul>`,dom).then(function(){
                 expect(dom.innerHTML).to.equal('<ul><li>One<!--outlet--></li><!--outlet-child--><li>Two<!--outlet--></li><!--outlet-child--><li>Three<!--outlet--></li><!--outlet-child--><!--outlet--></ul><!--outlet-->');
-                render(html`<ul>${''}</ul>`,dom).then(function(){
-                    expect(dom.innerHTML).to.equal('<ul><!--outlet--></ul><!--outlet-->');
-                    render(html`<ul>${htmlCollection(items,i=>i,i => html`<li>${i}</li>`)}</ul>`,dom).then(function(){
-                        expect(dom.innerHTML).to.equal('<ul><li>One<!--outlet--></li><!--outlet-child--><li>Two<!--outlet--></li><!--outlet-child--><li>Three<!--outlet--></li><!--outlet-child--><!--outlet--></ul><!--outlet-->');
-                        done();
-                    });
-
-                });
+                return render(html`<ul>${''}</ul>`,dom);
+            }).then(function(){
+                expect(dom.innerHTML).to.equal('<ul><!--outlet--></ul><!--outlet-->');
+                return render(html`<ul>${htmlCollection(items,i=>i,i => html`<li>${i}</li>`)}</ul>`,dom);
+            }).then(function(){
+                expect(dom.innerHTML).to.equal('<ul><li>One<!--outlet--></li><!--outlet-child--><li>Two<!--outlet--></li><!--outlet-child--><li>Three<!--outlet--></li><!--outlet-child--><!--outlet--></ul><!--outlet-->');
+                done();
             });
-
         })
 
     });
@@ -206,33 +190,42 @@ describe('yalla.js',function(){
     describe("HtmlTemplate features",function(){
         it('Should render HtmlTemplate',function(done){
             let dom = document.createElement('div');
-            render(html`Hello World`,dom);
-            expect(dom.innerHTML).to.equal('Hello World<!--outlet-->');
-            done();
+            render(html`Hello World`,dom).then(()=>{
+                expect(dom.innerHTML).to.equal('Hello World<!--outlet-->');
+                done();
+            });
         });
 
         it('Should render Component in component',function(done){
             let dom = document.createElement('div');
             render(html`<div>Hello ${html`Yalla`} World</div>`,dom).then(function(){
-                render(html`Hello ${html`Amazing`} World`,dom).then(function(){
-                    done();
-                });
-                expect(dom.innerHTML).to.equal('<div>Hello Amazing<!--outlet--> World</div><!--outlet-->');
-            });
-            expect(dom.innerHTML).to.equal('<div>Hello Yalla<!--outlet--> World</div><!--outlet-->');
+                expect(dom.innerHTML).to.equal('<div>Hello Yalla<!--outlet--> World</div><!--outlet-->');
+                return render(html`Hello ${html`Amazing`} World`,dom)
+            }).then(function(){
+                expect(dom.innerHTML).to.equal('<div>Hello Amazing<!--outlet--> World<!--outlet-->');
+                done();
+            }).catch(function(err){
+                done();
+            })
+
         });
 
         it('Should Promote the component and depromote them',function(done){
             let dom = document.createElement('div');
             render(html`<div>Hello ${html`Yalla`} World</div>`,dom).then(function(){
-                render(html`Hello World`,dom).then(function(){
-                    render(html`<div>Hello ${true} World</div>`,dom);
-                    expect(dom.innerHTML).to.equal('<div>Hello true<!--outlet--> World</div><!--outlet-->');
-                    done();
-                });
-                expect(dom.innerHTML).to.equal('<div>Hello <!--outlet--> World</div><!--outlet-->');
-            });
-            expect(dom.innerHTML).to.equal('<div>Hello Yalla<!--outlet--> World</div><!--outlet-->');
+                expect(dom.innerHTML).to.equal('<div>Hello Yalla<!--outlet--> World</div><!--outlet-->');
+                return render(html`Hello World`,dom)
+            }).then(function(){
+                expect(dom.innerHTML).to.equal('Hello World<!--outlet-->');
+                return render(html`<div>Hello ${true} World</div>`,dom);
+            }).then(() => {
+                expect(dom.innerHTML).to.equal('<div>Hello true<!--outlet--> World</div><!--outlet-->');
+                done();
+            }).catch(function(err){
+                console.error(err);
+                done();
+            })
+
         });
 
 
@@ -240,9 +233,9 @@ describe('yalla.js',function(){
             let dom = document.createElement('div');
             let items = ["one","two","three"];
             render(html`<div>Hello ${items} World</div>`,dom).then(function(){
+                expect(dom.innerHTML).to.equal('<div>Hello one,two,three<!--outlet--> World</div><!--outlet-->');
                 done();
             });
-            expect(dom.innerHTML).to.equal('<div>Hello one,two,three<!--outlet--> World</div><!--outlet-->');
         });
 
         it('should render duplicate node',function(done){
@@ -262,16 +255,6 @@ describe('yalla.js',function(){
         });
     });
 
-    describe("Promise and async",function(){
-        it('Should render HtmlTemplate',function(done){
-            let dom = document.createElement('div');
-            render(html`<div> ${new Promise(function (resolve){resolve(html`Hello World`)})} </div>`,dom).then(function(){
-                expect(true).to.equal(dom.innerHTML.toString().indexOf('<span')>0);
-                done();
-            });
-        });
-    });
-
     describe("Element Attribute",function(){
         it('Should render attribute modification',function(done){
             let dom = document.createElement('div');
@@ -285,14 +268,17 @@ describe('yalla.js',function(){
                 return render(html`<div style="color: ${color}; text-align: ${textAlign}; background-color: ${backgroundColor}">Hello World</div>`,dom)
             }
             renderDom().then(function(){
+                validateDom();
                 color = 'black';
                 textAlign = 'left';
                 backgroundColor = 'yellow';
-                renderDom();
+                return renderDom();
+
+            }).then(()=>{
                 validateDom();
                 done();
             });
-            validateDom();
+
         });
 
     });
@@ -303,33 +289,33 @@ describe('yalla.js',function(){
             let backgroundColor = 'blue';
             let color = 'red';
             let update = () => {
-                render(html`<style>.my-style{background-color:${backgroundColor};color:${color};}</style><div class="my-style"></div>`,dom);
+                return render(html`<style>.my-style{background-color:${backgroundColor};color:${color};}</style><div class="my-style"></div>`,dom);
             };
-            update();
-            expect(dom.innerHTML).to.equal('<style>.my-style{background-color:blue;color:red;}</style><div class="my-style"></div><!--outlet-->');
-            backgroundColor = '#CCC';
-            color = '#ddd';
-            update();
-            expect(dom.innerHTML).to.equal('<style>.my-style{background-color:#CCC;color:#ddd;}</style><div class="my-style"></div><!--outlet-->');
-            done();
+            update().then(()=> expect(dom.innerHTML).to.equal('<style>.my-style{background-color:blue;color:red;}</style><div class="my-style"></div><!--outlet-->')).then(()=>{
+                backgroundColor = '#CCC';
+                color = '#ddd';
+                return update();
+            }).then(()=>{
+                expect(dom.innerHTML).to.equal('<style>.my-style{background-color:#CCC;color:#ddd;}</style><div class="my-style"></div><!--outlet-->');
+                done();
+            });
+
         });
     });
 
     describe('Todo Application',function(){
-
         let dom = document.createElement('div');
         document.getElementsByTagName('body')[0].appendChild(dom);
 
         let todos = [
-            {id:Math.round(Math.random()*1000000),todo : 'Todo app testing sample data one',done : false},
-            {id:Math.round(Math.random()*1000000),todo : 'Todo app testing sample data two',done : true},
-            {id:Math.round(Math.random()*1000000),todo : 'Todo app testing sample data three',done : false},
+            {id:uuidv4(),todo : 'Todo app testing sample data one',done : false},
+            {id:uuidv4(),todo : 'Todo app testing sample data two',done : true},
+            {id:uuidv4(),todo : 'Todo app testing sample data three',done : false},
         ];
 
         function toggleDone(e){
             let index = Math.round(Math.random() * (todos.length - 1));
             let id = todos[index].id;
-            let styleBefore = document.getElementById(id).getAttribute('style').toString();
             let selectedTodo = todos.filter(t => t.id == id)[0];
             selectedTodo.done = !selectedTodo.done;
             return update();
@@ -375,4 +361,151 @@ describe('yalla.js',function(){
             });
         });
     });
+
+
+    describe("Promise and async",function(){
+
+        it('Should render html in async',function(done){
+            let {html,htmlCollection} = new Context();
+            let dom = document.createElement('div');
+            render(html`<div> ${new Promise(function (resolve){resolve(html`Hello World`)})} </div>`,dom).then(function(){
+                expect(dom.innerHTML).to.equal(`<div> Hello World<!--outlet--> </div><!--outlet-->`);
+                done();
+            });
+        });
+
+        it('Should render text in async',function(done){
+            let {html,htmlCollection} = new Context();
+            let dom = document.createElement('div');
+            render(html`<div> ${new Promise(function (resolve){resolve(`Hello World`)})} </div>`,dom).then(function(){
+                expect(dom.innerHTML).to.equal(`<div> Hello World<!--outlet--> </div><!--outlet-->`);
+                done();
+            });
+        });
+
+        it('Should render text in async',function(done){
+            let {html,htmlCollection} = new Context();
+            let dom = document.createElement('div');
+            render(html`<div> ${new Promise(function (resolve){resolve(html`<div>Hello World</div>`)})} </div>`,dom).then(function(){
+                expect(dom.innerHTML).to.equal(`<div> <div>Hello World</div><!--outlet--> </div><!--outlet-->`);
+                done();
+            });
+        });
+
+        it('Should render collection in async',function(done){
+            let {html,htmlCollection} = new Context();
+            let dom = document.createElement('div');
+            const asyncList = () =>{
+                return htmlCollection([{id:uuidv4(),label:'One'},{id:uuidv4(),label:'Two'},{id:uuidv4(),label:'Three'}],'id',data => {
+                    return new Promise(resolve => {
+                        resolve(html`<li>${data.label}</li>`)
+                    });
+                })
+            }
+            render(html`<ul> ${asyncList()} </ul>`,dom).then(function(){
+                expect(dom.innerHTML).to.equal(`<ul> <li>One<!--outlet--></li><!--outlet-child--><li>Two<!--outlet--></li><!--outlet-child--><li>Three<!--outlet--></li><!--outlet-child--><!--outlet--> </ul><!--outlet-->`);
+                done();
+            });
+        });
+
+        it('Should render collection in async',function(done){
+            let {html,htmlCollection} = new Context();
+            let dom = document.createElement('div');
+            const asyncList = () =>{
+                return htmlCollection([{id:uuidv4(),label:'One'},{id:uuidv4(),label:'Two'},{id:uuidv4(),label:'Three'}],'id',data => {
+                    return html`<li>${new Promise(resolve => resolve(data.label))}</li>`
+                })
+            }
+            render(html`<ul> ${asyncList()} </ul>`,dom).then(function(){
+                expect(dom.innerHTML).to.equal(`<ul> <li>One<!--outlet--></li><!--outlet-child--><li>Two<!--outlet--></li><!--outlet-child--><li>Three<!--outlet--></li><!--outlet-child--><!--outlet--> </ul><!--outlet-->`);
+                done();
+            });
+        });
+
+        it('Should render collection in async and removal',function(done){
+            let {html,htmlCollection} = new Context();
+            let dom = document.createElement('div');
+            let items = [{id:uuidv4(),label:'One'},{id:uuidv4(),label:'Two'},{id:uuidv4(),label:'Three'}];
+            const asyncList = () =>{
+                return htmlCollection(items,'id',data => {
+                    return html`<li>${new Promise(resolve => resolve(data.label))}</li>`
+                })
+            }
+
+            render(html`<ul> ${asyncList()} </ul>`,dom).then(function(){
+                expect(dom.innerHTML).to.equal(`<ul> <li>One<!--outlet--></li><!--outlet-child--><li>Two<!--outlet--></li><!--outlet-child--><li>Three<!--outlet--></li><!--outlet-child--><!--outlet--> </ul><!--outlet-->`);
+                items = [];
+                render(html`<ul> ${asyncList()} </ul>`,dom).then(function(){
+                    expect(dom.innerHTML).to.equal(`<ul><!--outlet--></ul><!--outlet-->`);
+                    done();
+                });
+            });
+
+        });
+
+    });
+
+    describe("Plug and async",function(){
+        it('Should render html in async',function(done){
+            let {html,htmlCollection} = new Context();
+            let dom = document.createElement('div');
+            render(html`<div> ${plug(outlet => {
+                setTimeout(()=>{
+                    outlet.setContent(html`<div>Hello World</div>`);
+                    expect(dom.innerHTML).to.equal(`<div> <div>Hello World</div><!--outlet--> </div><!--outlet-->`);
+                    outlet.setContent(html`<div>YallaJS</div>`);
+                    expect(dom.innerHTML).to.equal(`<div> <div>YallaJS</div><!--outlet--> </div><!--outlet-->`);
+                },100);
+            })} </div>`,dom).then(function(){
+                render(html`<div> ${plug(outlet => {
+                    setTimeout(()=>{
+                        outlet.setContent(html`<div>Hello World</div>`);
+                        expect(dom.innerHTML).to.equal(`<div> <div>Hello World</div><!--outlet--> </div><!--outlet-->`);
+                        outlet.setContent(html`<div>YallaJS</div>`);
+                        expect(dom.innerHTML).to.equal(`<div> <div>YallaJS</div><!--outlet--> </div><!--outlet-->`);
+                        done();
+                    },100);
+                })} </div>`,dom);
+            })
+        });
+
+        it('Should render Promise in async',function(done){
+            let context = new Context();
+            let {html,htmlCollection} = context;
+            let dom = document.createElement('div');
+            render(html`<div> ${new Promise(resolve => {resolve(html`<div>Hello World</div>`);})}</div>`,dom).then(function(){
+                expect(dom.innerHTML).to.equal(`<div> <div>Hello World</div><!--outlet--></div><!--outlet-->`);
+            }).then(function(){
+                render(html`<div> ${new Promise(resolve => {resolve(html`<div>Hello YallaJS</div>`);})}</div>`,dom).then(function(){
+                    expect(dom.innerHTML).to.equal(`<div> <div>Hello YallaJS</div><!--outlet--></div><!--outlet-->`);
+                    done();
+                });
+            });
+        });
+
+
+        it('Should render Promise in attribute',function(done){
+            let context = new Context();
+            let {html,htmlCollection} = context;
+            let dom = document.createElement('div');
+            render(html`<div style="background-color: ${new Promise(resolve => {resolve('blue')})};color: ${new Promise(resolve => {resolve('red')})}"> Hello World</div>`,dom).then(function(){
+                expect(dom.innerHTML.indexOf('background-color: blue')>0).to.equal(true);
+                expect(dom.innerHTML.indexOf('color: red')>0).to.equal(true);
+                done();
+            });
+        });
+
+        it('Should render Plug in attribute',function(done){
+            let context = new Context();
+            let {html,htmlCollection} = context;
+            let dom = document.createElement('div');
+            render(html`<div style="background-color: ${plug(outlet => outlet.setContent('blue'))};color: ${plug(outlet => outlet.setContent('red'))}"> Hello World</div>`,dom).then(function(){
+                expect(dom.innerHTML.indexOf('background-color: blue')>0).to.equal(true);
+                expect(dom.innerHTML.indexOf('color: red')>0).to.equal(true);
+                done();
+            });
+        });
+    });
+
+
 });
